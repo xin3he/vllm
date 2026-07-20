@@ -8,7 +8,10 @@ Validating the configuration and printing results for manual checking.
 Run `pytest tests/quantization/test_auto_round.py`.
 """
 
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from vllm.model_executor.layers.fused_moe import RoutedExperts
 from vllm.model_executor.layers.linear import LinearBase, UnquantizedLinearMethod
@@ -532,32 +535,41 @@ def test_inc_get_quant_method_linear_uses_resolved_scheme(monkeypatch) -> None:
     assert method is sentinel
 
 
-def test_inc_get_quant_method_lm_head_uses_suffix_match(monkeypatch) -> None:
-    """lm_head extra_config should apply to fully-qualified prefix."""
-    config = make_config(
-        extra_config={
-            "lm_head": {
-                "bits": 4,
-                "group_size": 128,
-                "sym": True,
-            }
-        }
-    )
-    layer = object.__new__(ParallelLMHead)
-    sentinel = object()
+def test_inc_nested_quantized_lm_head_registers_quantized_parameters(
+    monkeypatch,
+) -> None:
+    """A short AutoRound key must configure a nested ParallelLMHead."""
+
+    class RegisteringScheme(DummyLinearScheme):
+        def create_weights(self, layer, **_kwargs) -> None:
+            layer.qweight = torch.nn.Parameter(torch.empty(1), requires_grad=False)
+
+    quant_method = INCLinearMethod(RegisteringScheme())
 
     class DummyScheme:
-        def get_linear_method(self, _config, _layer, _prefix, _layer_config):
-            return sentinel
+        def get_linear_method(self, *_args) -> INCLinearMethod:
+            return quant_method
 
     monkeypatch.setattr(
         "vllm.model_executor.layers.quantization.inc.schemes.factory.resolve_scheme",
         lambda _layer_config: DummyScheme(),
     )
 
-    method = config.get_quant_method(layer, "model.language_model.lm_head")
+    tp_group = SimpleNamespace(rank_in_group=0, world_size=1)
+    monkeypatch.setattr(
+        "vllm.distributed.parallel_state.get_tp_group",
+        lambda: tp_group,
+    )
 
-    assert method is sentinel
+    config = make_config(extra_config={"lm_head": {"bits": 4}})
+    lm_head = ParallelLMHead(
+        num_embeddings=64,
+        embedding_dim=64,
+        quant_config=config,
+        prefix="model.language_model.lm_head",
+    )
+
+    assert set(dict(lm_head.named_parameters())) == {"qweight"}
 
 
 def test_inc_get_quant_method_moe_uses_resolved_scheme(monkeypatch) -> None:
