@@ -123,9 +123,7 @@ class INCNvFp4E5M3Scheme(INCScheme):
 def _decode_e5m3(values: torch.Tensor) -> torch.Tensor:
     exponent = (values >> 3).to(torch.int32)
     mantissa = (values & 0x07).to(torch.float32)
-    normal = (1.0 + mantissa / 8.0) * torch.pow(
-        torch.tensor(2.0, device=values.device), exponent - 15
-    )
+    normal = (1.0 + mantissa / 8.0) * torch.exp2((exponent - 15).float())
     subnormal = mantissa * (2.0**-17)
     return torch.where(exponent == 0, subnormal, normal)
 
@@ -175,3 +173,7 @@ def _encode_e5m3(values: torch.Tensor) -> torch.Tensor:
         torch.zeros_like(encoded),
         torch.where(values < 2**-14, subnormal, encoded),
     )
+
+
+INCNvFp4E5M3ReferenceLinearScheme = INCNvFp4E5M3LinearScheme
+INCNvFp4E5M3ReferenceScheme = INCNvFp4E5M3Scheme

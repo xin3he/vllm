@@ -4,12 +4,17 @@
 from typing import TYPE_CHECKING
 
 import torch
-import torch.nn.functional as F
 from torch.nn import Parameter
 
+from vllm.model_executor.kernels.linear.cute_dsl.inc_nvfp4_e5m3 import (
+    inc_nvfp4_e5m3_gemm,
+    is_available,
+)
 from vllm.model_executor.parameter import GroupQuantScaleParameter, ModelWeightParameter
+from vllm.platforms import current_platform
 
 from ..inc_linear import INCLinearMethod
+from .inc_nvfp4_e5m3_scheme import _decode_e5m3, _qdq_fp4_v2
 from .inc_scheme import INCLinearScheme, INCScheme
 
 if TYPE_CHECKING:
@@ -17,14 +22,14 @@ if TYPE_CHECKING:
     from ..inc import INCConfig
 
 
-class INCNvFp4E5M3LinearScheme(INCLinearScheme):
-    """Reference implementation for AutoRound FP4-v2 E5M3 checkpoints."""
+class INCCuteNvFp4E5M3LinearScheme(INCLinearScheme):
+    """CuteDSL implementation for AutoRound FP4-v2 E5M3 checkpoints."""
 
     group_size = 16
 
     @classmethod
     def get_min_capability(cls) -> int:
-        return 0
+        return 80
 
     def create_weights(
         self,
@@ -84,7 +89,8 @@ class INCNvFp4E5M3LinearScheme(INCLinearScheme):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         layer.weight_scale = Parameter(
-            _decode_e5m3(layer.weight_scale), requires_grad=False
+            _decode_e5m3(layer.weight_scale),
+            requires_grad=False,
         )
 
     def apply_weights(
@@ -93,18 +99,22 @@ class INCNvFp4E5M3LinearScheme(INCLinearScheme):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        weight = _unpack_fp4(layer.weight_packed).reshape(
-            layer.output_size_per_partition, layer.input_size_per_partition
+        output_size = layer.output_size_per_partition
+        output_shape = [*x.shape[:-1], output_size]
+        quantized_x = _qdq_fp4_v2(x, self.group_size).reshape(
+            -1, layer.input_size_per_partition
         )
-        weight = weight.reshape(-1, self.group_size)
-        weight = weight * layer.weight_scale.reshape(-1, 1)
-        weight = weight.reshape(
-            layer.output_size_per_partition, layer.input_size_per_partition
-        )
-        return F.linear(_qdq_fp4_v2(x, self.group_size), weight.to(x.dtype), bias)
+        out = inc_nvfp4_e5m3_gemm(
+            quantized_x,
+            layer.weight_packed,
+            layer.weight_scale,
+        ).to(x.dtype)
+        if bias is not None:
+            out = out + bias
+        return out.view(*output_shape)
 
 
-class INCNvFp4E5M3Scheme(INCScheme):
+class INCCuteNvFp4E5M3Scheme(INCScheme):
     @staticmethod
     def can_handle(layer_config: "INCLayerConfig") -> bool:
         return layer_config.is_nvfp4_e5m3
@@ -117,61 +127,8 @@ class INCNvFp4E5M3Scheme(INCScheme):
         layer_config: "INCLayerConfig",
     ) -> INCLinearMethod:
         del config, layer, prefix, layer_config
-        return INCLinearMethod(INCNvFp4E5M3LinearScheme())
-
-
-def _decode_e5m3(values: torch.Tensor) -> torch.Tensor:
-    exponent = (values >> 3).to(torch.int32)
-    mantissa = (values & 0x07).to(torch.float32)
-    normal = (1.0 + mantissa / 8.0) * torch.pow(
-        torch.tensor(2.0, device=values.device), exponent - 15
-    )
-    subnormal = mantissa * (2.0**-17)
-    return torch.where(exponent == 0, subnormal, normal)
-
-
-def _unpack_fp4(packed: torch.Tensor) -> torch.Tensor:
-    nibbles = torch.stack((packed & 0x0F, packed >> 4), dim=-1).reshape(-1)
-    magnitude_indices = (nibbles & 0x07).long()
-    magnitude = torch.tensor(
-        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
-        device=packed.device,
-    )[magnitude_indices]
-    return torch.where(nibbles & 0x08 != 0, -magnitude, magnitude)
-
-
-def _qdq_fp4_v2(x: torch.Tensor, group_size: int) -> torch.Tensor:
-    original_shape = x.shape
-    grouped = x.float().reshape(-1, group_size)
-    scale = grouped.abs().amax(dim=1, keepdim=True) / 6.0
-    scale = _decode_e5m3(_encode_e5m3(scale))
-    scaled = torch.where(scale == 0, torch.zeros_like(grouped), grouped / scale)
-    magnitude = scaled.abs()
-    quantized = torch.where(
-        magnitude < 2.0,
-        torch.round(magnitude * 2.0) / 2.0,
-        torch.where(
-            magnitude < 4.0,
-            torch.round(magnitude),
-            2.0 * torch.round(magnitude / 2.0),
-        ),
-    ).clamp(max=6.0)
-    return (
-        (torch.copysign(quantized, scaled) * scale)
-        .reshape(original_shape)
-        .to(x.dtype)
-    )
-
-
-def _encode_e5m3(values: torch.Tensor) -> torch.Tensor:
-    values = values.clamp(min=0.0)
-    mantissa, exponent = torch.frexp(values)
-    exponent_bits = (exponent + 14).clamp(0, 31)
-    mantissa_bits = ((mantissa - 0.5) * 16.0).round().clamp(0, 7)
-    encoded = (exponent_bits.to(torch.uint8) << 3) | mantissa_bits.to(torch.uint8)
-    subnormal = (values / (2.0**-14) * 8.0).round().clamp(1, 7).to(torch.uint8)
-    return torch.where(
-        values == 0,
-        torch.zeros_like(encoded),
-        torch.where(values < 2**-14, subnormal, encoded),
-    )
+        if not current_platform.has_device_capability(80) or not is_available():
+            raise NotImplementedError(
+                "INC NVFP4 E5M3 CuteDSL requires an sm_80+ GPU and CUTLASS Python."
+            )
+        return INCLinearMethod(INCCuteNvFp4E5M3LinearScheme())
