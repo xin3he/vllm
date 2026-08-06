@@ -44,6 +44,15 @@ class INCLayerConfig:
     def is_mxfp8(self) -> bool:
         return self.data_type == "mx_fp" and self.bits == 8
 
+    @property
+    def is_nvfp4_e5m3(self) -> bool:
+        return (
+            self.data_type == "fp4_v2"
+            and self.bits == 4
+            and self.group_size == 16
+            and self.packing_format == "auto_round:llm_compressor_nvfp4_e5m3"
+        )
+
 
 class INCConfigParser:
     def __init__(self, config: "INCConfig") -> None:

@@ -35,8 +35,12 @@ class INCConfig(QuantizationConfig):
     """
 
     SUPPORTED_BITS = {2, 3, 4, 8}
-    SUPPORTED_DTYPES = {"int"}
-    SUPPORTED_FORMATS = {"auto_round:auto_gptq", "auto_round:auto_awq"}
+    SUPPORTED_DTYPES = {"int", "fp4_v2"}
+    SUPPORTED_FORMATS = {
+        "auto_round:auto_gptq",
+        "auto_round:auto_awq",
+        "auto_round:llm_compressor_nvfp4_e5m3",
+    }
     SUPPORTED_BACKENDS = {
         "auto",
         "gptq",
