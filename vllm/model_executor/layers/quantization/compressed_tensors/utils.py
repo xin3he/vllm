@@ -128,10 +128,13 @@ def find_matched_target(
     (or regexes corresponding to layer names) or names of torch Modules.
 
     First, we try to match the layer_name with a target
-    Second, we try to match the module's name with a target
-    Third, we try to map the layer_name to a list of fused module names.
+    Second, we try to map the layer_name to a list of fused module names.
         *All* component module names must match in order for a match to be
         successful. A successful match returns the first component target
+    Third, we try to match the module's name with a target (e.g. generic
+        class-name targets like "Linear"). This is checked last since it is
+        the least specific: an unfused-name match or a fused-shard match
+        should take priority over a broad class-name match.
 
     Args:
         layer_name: layer name
@@ -145,8 +148,8 @@ def find_matched_target(
 
     matched_target = (
         _find_first_match(layer_name, targets)
-        or _find_first_match(module.__class__.__name__, targets, True)
         or _match_fused_layer(layer_name, targets, fused_mapping)
+        or _find_first_match(module.__class__.__name__, targets, True)
     )
 
     return matched_target

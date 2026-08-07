@@ -40,6 +40,7 @@ from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tenso
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme,
     CompressedTensorsW4A4Fp4,
+    CompressedTensorsW4A4Fp4E5M3,
     CompressedTensorsW4A4Mxfp4,
     CompressedTensorsW4A8Fp8,
     CompressedTensorsW4A8Int,
@@ -729,6 +730,16 @@ class CompressedTensorsConfig(QuantizationConfig):
     ) -> "CompressedTensorsScheme":
         # use the per-layer format if defined, otherwise, use global format
         format = format if format is not None else self.quant_format
+
+        # AutoRound's "nvfp4+" (nvfp4-e5m3-pack-quantized) checkpoints use
+        # the same QuantizationArgs shape as standard NVFP4 (group_size=16,
+        # 4-bit float, symmetric, tensor_group) but encode the per-group
+        # scale as unsigned E5M3 instead of float8_e4m3fn, and omit the
+        # per-tensor global scales. Must be checked before the generic
+        # _is_nvfp4_format branch below, which would otherwise incorrectly
+        # select the standard e4m3-scale NVFP4 scheme.
+        if format == "nvfp4-e5m3-pack-quantized":
+            return CompressedTensorsW4A4Fp4E5M3()
 
         # Detect If Mixed Precision
         if self._is_nvfp4_format(weight_quant):
