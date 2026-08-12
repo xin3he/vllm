@@ -29,6 +29,48 @@ logger = init_logger(__name__)
 
 class CompressedTensorsMoEMethod(FusedMoEMethodBase):
     @staticmethod
+    def _get_explicit_moe_scheme_dict(
+        quant_config: "CompressedTensorsConfig",  # type: ignore # noqa E501
+        layer_name: str,
+    ) -> dict | None:
+        """Prefer explicit expert-target matches over class-name fallback.
+
+        Some checkpoints (e.g. DeepSeek-style exports) encode MoE targets as
+        ``...experts.<id>.w1/w2/w3`` rather than
+        ``...experts.<id>.gate_proj/up_proj/down_proj``. If we only query via
+        ``get_scheme_dict`` first, class-name fallback (``RoutedExperts`` <-
+        ``Linear``) can mask these explicit targets and incorrectly route MoE
+        to a generic scheme.
+        """
+
+        # Try the common checkpoint aliases first.
+        candidate_proj_sets = [
+            [".0.w1", ".0.w3", ".0.w2"],
+            [".0.gate_proj", ".0.up_proj", ".0.down_proj"],
+        ]
+
+        for proj_suffixes in candidate_proj_sets:
+            names = [layer_name + suffix for suffix in proj_suffixes]
+            explicit_scheme_dicts = [
+                quant_config.target_scheme_map.get(name) for name in names
+            ]
+            if not any(scheme is not None for scheme in explicit_scheme_dicts):
+                continue
+
+            scheme_dict = explicit_scheme_dicts[0]
+            if not all(cur_dict == scheme_dict for cur_dict in explicit_scheme_dicts):
+                raise ValueError(
+                    "All MoE projections need to have same quantization "
+                    "scheme but found multiple"
+                )
+
+            if scheme_dict is not None and scheme_dict.get("format") is None:
+                scheme_dict["format"] = quant_config.quant_format
+            return scheme_dict
+
+        return None
+
+    @staticmethod
     def get_moe_method(
         quant_config: "CompressedTensorsConfig",  # type: ignore # noqa E501
         layer: torch.nn.Module,
@@ -37,22 +79,29 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
         # RoutedExperts was made by combining multiple Linears so need to
         # make sure quantization config for Linear can target it
         quant_config._add_fused_moe_to_target_scheme_map()
-        unfused_names = [
-            layer_name + proj_name
-            for proj_name in [".0.gate_proj", ".0.up_proj", ".0.down_proj"]
-        ]
-        # TODO: refactor this to use expert_mapping and check all layer numbers
-        all_scheme_dicts = [
-            quant_config.get_scheme_dict(layer, name) for name in unfused_names
-        ]
-        scheme_dict = all_scheme_dicts.pop()
+        scheme_dict = CompressedTensorsMoEMethod._get_explicit_moe_scheme_dict(
+            quant_config,
+            layer_name,
+        )
 
-        # multiple schemes found
-        if not all([cur_dict == scheme_dict for cur_dict in all_scheme_dicts]):
-            raise ValueError(
-                "All MoE projections need to have same "
-                "quantization scheme but found multiple"
-            )
+        if scheme_dict is None:
+            unfused_names = [
+                layer_name + proj_name
+                for proj_name in [".0.gate_proj", ".0.up_proj", ".0.down_proj"]
+            ]
+            # TODO: refactor this to use expert_mapping and check all layer
+            # numbers.
+            all_scheme_dicts = [
+                quant_config.get_scheme_dict(layer, name) for name in unfused_names
+            ]
+            scheme_dict = all_scheme_dicts.pop()
+
+            # multiple schemes found
+            if not all(cur_dict == scheme_dict for cur_dict in all_scheme_dicts):
+                raise ValueError(
+                    "All MoE projections need to have same "
+                    "quantization scheme but found multiple"
+                )
 
         if scheme_dict is None:  # ignored layer
             return UnquantizedFusedMoEMethod(layer.moe_config)
