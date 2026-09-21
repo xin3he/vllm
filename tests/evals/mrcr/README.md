@@ -4,6 +4,47 @@ Smoke test for long-context behavior using OpenAI's public [`openai/mrcr`](https
 
 **Scoring:** if the response doesn't start with `random_string_to_prepend`, score is 0; otherwise the prefix is stripped and the mean `SequenceMatcher.ratio()` against the reference answer is reported.
 
+## What MRCR Tests
+
+MRCR (Multi-round Conversation Retrieval) evaluates whether a model can retrieve
+the correct earlier assistant turn from a long multi-turn conversation. Each
+sample contains several near-duplicate historical answers, asks for one specific
+answer, and prepends the target with a random anti-guessing string. The task
+therefore tests long-context retrieval, discrimination between similar candidates,
+conversation-history retention, and generation after a long prompt.
+
+The dataset is split into three buckets:
+
+- `2 needles`: a quick check of basic long-context retrieval;
+- `4 needles`: a harder test with more similar candidates;
+- `8 needles`: the most difficult bucket and usually the most sensitive to retrieval errors.
+
+## Why It Is Useful for KV Cache Evaluation
+
+During decoding, every generated token attends to the keys and values stored for
+the prompt and previous generated tokens. Changing the KV cache dtype can alter
+the numerical precision of those states and make similar needles harder to
+distinguish. This effect is often small on short prompts but is easier to expose
+with MRCR's long prompts and near-duplicate answers.
+
+When comparing KV cache dtypes, keep the model, sample set, needle buckets,
+context limits, sampling settings, seed, and concurrency fixed. Change only
+`--kv-cache-dtype`.
+
+## Interpreting Results
+
+In addition to the aggregate `match_ratio`, inspect `match_ratio_n2`,
+`match_ratio_n4`, and `match_ratio_n8`. A regression limited to `match_ratio_n8`
+can indicate that quantization affects discrimination among more similar
+candidates even when the aggregate score looks stable. A lower `prefix_hit_rate`
+usually means that the model retrieved the wrong target or violated the expected
+answer format.
+
+The batch comparison also reports `tokens_per_second`. Similar accuracy with
+higher throughput indicates a useful trade-off; unchanged accuracy across all
+settings may simply mean that the prompt length or sample count is not sufficient
+to expose the difference.
+
 ## Usage
 
 ```bash
@@ -14,6 +55,57 @@ pytest -s -v tests/evals/mrcr/test_mrcr_correctness.py \
 # Standalone (server already running; model and context auto-discovered)
 vllm serve Qwen/Qwen3-0.6B --reasoning-parser qwen3 --port 8000
 python tests/evals/mrcr/mrcr_eval.py --port 8000
+```
+
+### Compare KV Cache Dtypes
+
+Use the batch script to start a fresh server for each dtype, run the same MRCR
+sample set, and write one JSON result plus one server log per dtype:
+
+```bash
+./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
+  --model Qwen/Qwen3-0.6B \
+  --dtypes "bfloat16 fp8" \
+  --output-dir results/mrcr-qwen3-kv \
+  --server-arg "--max-model-len" \
+  --server-arg "32768" \
+  --server-arg "--reasoning-parser" \
+  --server-arg qwen3
+```
+
+When multiple visible GPUs are available, pass a comma-separated device list.
+The script runs up to one dtype evaluation per device in parallel, then starts
+the next batch when the current batch finishes. Thus four dtypes with
+`--devices "0,1,2"` run as batches `0,1,2` and then `0`. `CUDA_VISIBLE_DEVICES`
+is used when `--devices` is omitted. GPU 7 is reserved and rejected by the
+script. Each parallel run uses its own port.
+If a requested port is already in use, the script automatically probes the next
+available port and assigns distinct ports to parallel runs.
+
+Every dtype run receives the same `--seed` value (default: `42`), so it uses
+the same deterministic streaming-shuffle order and generation seed, provided
+the dataset revision, model, tokenizer, and context limits are unchanged. Use
+`--seed N` to select and record another shared seed.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2 \
+./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
+  --model Qwen/Qwen3-0.6B \
+  --dtypes "bfloat16 fp8 int8_per_token_head" \
+  --devices "0,1,2"
+```
+
+The script writes `summary.tsv`, per-dtype JSON files, and server logs under
+`--output-dir`. Set `VLLM_PYTHON` when the virtual environment is not at
+`.venv/bin/python`. The default comparison is `bfloat16` versus `fp8`; for a
+more aggressive comparison, for example:
+
+```bash
+./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
+  --model <model> \
+  --dtypes "bfloat16 fp8 int8_per_token_head int4_per_token_head" \
+  --num-samples 10 \
+  --max-prompt-tokens 32768
 ```
 
 ## Configuration

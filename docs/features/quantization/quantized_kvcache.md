@@ -6,6 +6,43 @@ Efficient memory usage is crucial for working with large language models. Quanti
 
 > **Note:** When using the Flash Attention 3 backend with FP8 KV cache, attention operations are also performed in the quantized (FP8) domain. In this configuration, queries are quantized to FP8 in addition to keys and values.
 
+## KV Cache Dtype Reference
+
+The following table lists the dtype strings currently accepted by vLLM's cache
+configuration. Availability still depends on the model, attention backend, and
+hardware. The entries marked **specialized** should not be assumed to work as a
+drop-in dtype for every model.
+
+| `kv_cache_dtype` | Cache representation | Typical use | Availability and notes |
+| --- | --- | --- | --- |
+| `auto` | Model dtype | Default configuration | Uses the model's dtype. This is the most broadly compatible option. |
+| `float16` | FP16 | Native-precision cache on FP16 deployments | General-purpose unquantized cache where FP16 is desired. |
+| `bfloat16` | BF16 | Native-precision cache on BF16 deployments | General-purpose unquantized cache. Some models that default to a quantized cache require explicitly selecting BF16. |
+| `fp8` | FP8 E4M3, per tensor | General FP8 KV-cache quantization | Alias for `fp8_e4m3`; supported on CUDA 11.8+ and ROCm where the selected attention backend supports it. |
+| `fp8_e4m3` | FP8 E4M3, per tensor | FP8 KV-cache quantization with the E4M3 format | CUDA 11.8+ and ROCm support is documented; backend support is still required. |
+| `fp8_e5m2` | FP8 E5M2, per tensor | FP8 KV-cache quantization when E5M2 is preferred | CUDA 11.8+; not generally available on ROCm. |
+| `fp8_inc` | Gaudi FP8 E4M3 representation | FP8 KV cache on Intel Gaudi/HPU | HPU-specific representation; not a general CUDA/ROCm choice. |
+| `fp8_per_token_head` | FP8 with per-token, per-head scales | Calibrated FP8 cache for accuracy-sensitive deployments | Specialized path; currently associated with Flash Attention and calibration support. |
+| `int4_per_token_head` | Packed INT4 with per-token, per-head scales | Aggressive KV-cache compression | Specialized per-head quantization path; requires a backend that implements this mode. |
+| `int8_per_token_head` | INT8 with per-token, per-head scales | Lower-loss per-head KV-cache compression | Specialized per-head quantization path; requires a backend that implements this mode. |
+| `fp8_ds_mla` | DeepSeek MLA packed, block-scaled FP8 | DeepSeek V3.2/V4-family MLA compressed cache | Specialized MLA layout; use only with a compatible DeepSeek/MLA implementation. |
+| `nvfp4_ds_mla` | DeepSeek MLA packed NVFP4 | DeepSeek V4.1 MLA compressed cache | Specialized MLA layout; requires the compatible FlashMLA/MLA implementation and hardware support. |
+| `nvfp4` | Packed NVFP4 | NVFP4 KV-cache quantization | Specialized NVFP4 kernels and hardware support are required. |
+| `nvfp4_4over6` | Packed NVFP4 with 4-over-6 scale selection | NVFP4 cache with reconstruction-error-aware scale selection | Specialized NVFP4 layout; not a universal fallback for ordinary attention backends. |
+| `turboquant_k8v4` | TurboQuant K8V4 packed format | TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
+| `turboquant_4bit_nc` | TurboQuant 4-bit non-contiguous format | 4-bit TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
+| `turboquant_k3v4_nc` | TurboQuant K3V4 non-contiguous format | K3V4 TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
+| `turboquant_3bit_nc` | TurboQuant 3-bit non-contiguous format | 3-bit TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
+
+`fp8`, `fp8_e4m3`, and `fp8_e5m2` are per-tensor FP8 modes. The
+`*_per_token_head` modes use a different scaling scheme and therefore require
+backend-specific support. The `*_ds_mla`, `nvfp4*`, and `turboquant_*` values
+describe packed layouts rather than only a PyTorch scalar dtype; they are tied
+to particular attention or quantization kernels.
+
+For hybrid models, `--kv-cache-dtype-skip-layers` can leave selected layers at
+the model's native dtype while quantizing the remaining KV cache layers.
+
 ### Supported FP8 KV-Cache Quantization Schemes
 
 vLLM supports two main quantization strategies for the FP8 KV-cache:

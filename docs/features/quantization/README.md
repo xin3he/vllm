@@ -20,6 +20,7 @@ The following are the supported quantization formats for vLLM:
 - [Online Quantization](online.md)
 - [AMD Quark](quark.md)
 - [Quantized KV Cache](quantized_kvcache.md)
+- [量化 KV Cache（中文版）](quantized_kvcache_zh.md)
 - [TorchAO](torchao.md)
 - [FP8 ViT Encoder Attention](fp8_vit_attn.md)
 
