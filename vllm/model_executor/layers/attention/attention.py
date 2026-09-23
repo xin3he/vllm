@@ -12,6 +12,7 @@ from vllm.config import CacheConfig, get_current_vllm_config
 from vllm.config.vllm import VllmConfig
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.logger import init_logger
+from vllm.model_executor.layers.attention.kv_cache_qdq import fp4_kv_cache_qdq
 from vllm.model_executor.layers.attention.kv_transfer_utils import (
     maybe_transfer_kv_layer,
 )
@@ -271,8 +272,10 @@ class Attention(nn.Module, AttentionLayerBase):
         vllm_config = get_current_vllm_config()
         if cache_config is not None:
             kv_cache_dtype = cache_config.cache_dtype
+            kv_cache_qdq = cache_config.kv_cache_qdq
         else:
             kv_cache_dtype = "auto"
+            kv_cache_qdq = None
 
         # llm-compressor models declare an FP8 KV-cache scheme in their
         # checkpoint config. Honor it only when the user did not explicitly
@@ -281,7 +284,11 @@ class Attention(nn.Module, AttentionLayerBase):
         # resolve_kv_cache_dtype_string, but we re-apply here defensively in
         # case anything bypassed that path.
         kv_cache_scheme = getattr(quant_config, "kv_cache_scheme", None)
-        if kv_cache_scheme is not None and kv_cache_dtype == "auto":
+        if (
+            kv_cache_scheme is not None
+            and kv_cache_dtype == "auto"
+            and kv_cache_qdq is None
+        ):
             kv_cache_dtype = "fp8"
             if cache_config is not None:
                 cache_config.cache_dtype = "fp8"
@@ -309,6 +316,7 @@ class Attention(nn.Module, AttentionLayerBase):
                 skip = True
             if skip:
                 kv_cache_dtype = "auto"
+                kv_cache_qdq = None
             logger.debug(
                 "Layer %s: kv_cache_dtype=%s, sliding_window=%s",
                 prefix,
@@ -320,6 +328,7 @@ class Attention(nn.Module, AttentionLayerBase):
             kv_cache_dtype, vllm_config.model_config
         )
         self.kv_cache_dtype = kv_cache_dtype
+        self.kv_cache_qdq = kv_cache_qdq
         if num_kv_heads is None:
             num_kv_heads = num_heads
         assert num_heads % num_kv_heads == 0, (
@@ -532,6 +541,11 @@ class Attention(nn.Module, AttentionLayerBase):
             key = key.view(-1, self.num_kv_heads, self.head_size)
         if value is not None:
             value = value.view(-1, self.num_kv_heads, self.head_size_v)
+        if self.kv_cache_qdq is not None and self.kv_sharing_target_layer_name is None:
+            if key is not None:
+                key = fp4_kv_cache_qdq(key, self.kv_cache_qdq)
+            if value is not None:
+                value = fp4_kv_cache_qdq(value, self.kv_cache_qdq)
         kv_cache_dummy_dep = None
         if self.use_direct_call:
             # Skip this if sharing KV cache with an earlier attention layer.

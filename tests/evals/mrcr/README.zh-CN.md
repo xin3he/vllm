@@ -1,5 +1,5 @@
-# MRCR 长上下文准确率评测
-
+# MRCR 长上下文准确率评
+c
 MRCR（Multi-round Conversation Retrieval）是一个用于测试模型长上下文检索能力的评测。它来自 OpenAI 公开的 [`openai/mrcr`](https://huggingface.co/datasets/openai/mrcr) 数据集，特别适合检查模型能否在很长的多轮对话中定位并复现较早出现的信息。
 
 ## MRCR 测试什么
@@ -115,7 +115,7 @@ python tests/evals/mrcr/mrcr_eval.py --port 8000
 ./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
     --model Qwen/Qwen3-0.6B \
     --dtypes "bfloat16 fp8" \
-    --output-dir results/mrcr-qwen3-kv \
+    --output-dir kv-cache-results/mrcr-qwen3-kv \
     --server-arg "--max-model-len" \
     --server-arg "32768" \
     --server-arg "--reasoning-parser" \
@@ -167,20 +167,20 @@ VLLM_PYTHON=/path/to/python \
 
 ## 重要参数
 
-| 参数 | 含义 | 默认值 |
-| --- | --- | --- |
-| `--model` | Hugging Face 模型名或本地模型路径 | 必填 |
-| `--dtypes` | 要依次比较的 KV Cache dtype，空格分隔 | `bfloat16 fp8` |
-| `--devices` | 轮转分配给各 dtype 的 GPU，逗号分隔 | `CUDA_VISIBLE_DEVICES` |
-| `--output-dir` | 结果、日志和汇总文件目录 | 带时间戳的目录 |
-| `--port` | 第一个 server 使用的端口；后续 dtype 递增端口 | `8000` |
-| `--num-samples` | 每个 dtype 使用的样本数 | `40` |
-| `--needles` | 测试的 needle 分桶 | `2 4 8` |
-| `--max-prompt-tokens` | prompt 最大 token 数 | 根据 server 自动计算 |
-| `--max-tokens` | 最大输出 token 数 | `2048` |
-| `--concurrency` | MRCR 请求并发数 | `8` |
-| `--seed` | 所有 dtype 共享的 sample 和生成随机种子 | `42` |
-| `--server-arg` | 传给 `vllm serve` 的额外参数，可重复 | 无 |
+| 参数                    | 含义                                          | 默认值                   |
+| ----------------------- | --------------------------------------------- | ------------------------ |
+| `--model`             | Hugging Face 模型名或本地模型路径             | 必填                     |
+| `--dtypes`            | 要依次比较的 KV Cache dtype，空格分隔         | `bfloat16 fp8`         |
+| `--devices`           | 轮转分配给各 dtype 的 GPU，逗号分隔           | `CUDA_VISIBLE_DEVICES` |
+| `--output-dir`        | 结果、日志和汇总文件目录                      | `kv-cache-results/mrcr-<时间戳>` |
+| `--port`              | 第一个 server 使用的端口；后续 dtype 递增端口 | `8000`                 |
+| `--num-samples`       | 每个 dtype 使用的样本数                       | `40`                   |
+| `--needles`           | 测试的 needle 分桶                            | `2 4 8`                |
+| `--max-prompt-tokens` | prompt 最大 token 数                          | 根据 server 自动计算     |
+| `--max-tokens`        | 最大输出 token 数                             | `2048`                 |
+| `--concurrency`       | MRCR 请求并发数                               | `8`                    |
+| `--seed`              | 所有 dtype 共享的 sample 和生成随机种子       | `42`                   |
+| `--server-arg`        | 传给`vllm serve` 的额外参数，可重复         | 无                       |
 
 ## 配置示例
 
@@ -230,13 +230,13 @@ vllm serve <model> \
 
 推荐重点查看 `summary.tsv` 中的以下列：
 
-| 现象 | 可能含义 |
-| --- | --- |
-| `match_ratio` 明显下降 | KV Cache 量化误差影响了答案内容或长距离检索 |
-| `prefix_hit_rate` 下降 | 模型更频繁地找错目标，或输出格式受到影响 |
-| 只有 `match_ratio_n8` 下降 | 更多相似 needle 导致量化后的注意力区分能力不足 |
-| 只有长 prompt 下下降 | 误差可能与上下文长度或远距离 token 访问有关 |
-| 准确率接近但 tokens/s 提升 | dtype 主要带来性能或显存收益，精度损失较小 |
-| 所有指标都不变 | 当前模型、上下文长度或样本量可能不足以暴露差异 |
+| 现象                        | 可能含义                                       |
+| --------------------------- | ---------------------------------------------- |
+| `match_ratio` 明显下降    | KV Cache 量化误差影响了答案内容或长距离检索    |
+| `prefix_hit_rate` 下降    | 模型更频繁地找错目标，或输出格式受到影响       |
+| 只有`match_ratio_n8` 下降 | 更多相似 needle 导致量化后的注意力区分能力不足 |
+| 只有长 prompt 下下降        | 误差可能与上下文长度或远距离 token 访问有关    |
+| 准确率接近但 tokens/s 提升  | dtype 主要带来性能或显存收益，精度损失较小     |
+| 所有指标都不变              | 当前模型、上下文长度或样本量可能不足以暴露差异 |
 
 为了提高结论可信度，建议先用较小样本数快速筛选，再对候选 dtype 使用更大的 `--num-samples` 和多个随机种子复测。

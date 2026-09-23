@@ -46,6 +46,15 @@ def test_optional_type():
     assert optional_type_func("42") == 42
 
 
+@pytest.mark.parametrize("format", ["mxfp4", "nvfp4", "nvfp4_4over6"])
+def test_kv_cache_dtype_qdq_cli(format):
+    parser = EngineArgs.add_cli_args(FlexibleArgumentParser())
+    args = EngineArgs.from_cli_args(
+        parser.parse_args(["--kv-cache-dtype", f"{format}_qdq"])
+    )
+    assert args.kv_cache_dtype == f"{format}_qdq"
+
+
 def test_watermark_config_cli():
     parser = EngineArgs.add_cli_args(FlexibleArgumentParser())
     args = parser.parse_args(

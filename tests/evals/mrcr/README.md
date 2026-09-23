@@ -66,7 +66,7 @@ sample set, and write one JSON result plus one server log per dtype:
 ./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
   --model Qwen/Qwen3-0.6B \
   --dtypes "bfloat16 fp8" \
-  --output-dir results/mrcr-qwen3-kv \
+  --output-dir kv-cache-results/mrcr-qwen3-kv \
   --server-arg "--max-model-len" \
   --server-arg "32768" \
   --server-arg "--reasoning-parser" \
@@ -96,8 +96,9 @@ CUDA_VISIBLE_DEVICES=0,1,2 \
 ```
 
 The script writes `summary.tsv`, per-dtype JSON files, and server logs under
-`--output-dir`. Set `VLLM_PYTHON` when the virtual environment is not at
-`.venv/bin/python`. The default comparison is `bfloat16` versus `fp8`; for a
+`--output-dir` (default: `kv-cache-results/mrcr-<timestamp>/`). Set
+`VLLM_PYTHON` when the virtual environment is not at `.venv/bin/python`. The
+default comparison is `bfloat16` versus `fp8`; for a
 more aggressive comparison, for example:
 
 ```bash

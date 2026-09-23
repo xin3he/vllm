@@ -10,30 +10,43 @@
 
 下表列出了 vLLM Cache 配置当前接受的 dtype 字符串。实际可用性取决于模型、Attention 后端和硬件。标记为**专用**的 dtype 不能假定适用于所有模型。
 
-| `kv_cache_dtype` | Cache 表示形式 | 典型使用场景 | 可用性与说明 |
-| --- | --- | --- | --- |
-| `auto` | 模型 dtype | 默认配置 | 使用模型自身的 dtype，兼容性最广。 |
-| `float16` | FP16 | FP16 部署中的原生精度 Cache | 适用于希望使用 FP16 的通用非量化 Cache。 |
-| `bfloat16` | BF16 | BF16 部署中的原生精度 Cache | 通用非量化 Cache。某些默认使用量化 Cache 的模型需要显式指定 BF16。 |
-| `fp8` | FP8 E4M3，逐张量 | 通用 FP8 KV Cache 量化 | `fp8_e4m3` 的别名；CUDA 11.8+ 和 ROCm 支持，但仍要求所选 Attention 后端实现该模式。 |
-| `fp8_e4m3` | FP8 E4M3，逐张量 | 使用 E4M3 格式的 FP8 KV Cache 量化 | CUDA 11.8+ 和 ROCm 支持；仍要求后端支持。 |
-| `fp8_e5m2` | FP8 E5M2，逐张量 | 需要 E5M2 格式时的 FP8 KV Cache 量化 | 支持 CUDA 11.8+；通常不适用于 ROCm。 |
-| `fp8_inc` | Gaudi FP8 E4M3 表示形式 | Intel Gaudi/HPU 上的 FP8 KV Cache | HPU 专用表示形式，不是通用的 CUDA/ROCm 选项。 |
-| `fp8_per_token_head` | FP8，使用逐 token、逐 head scale | 对精度敏感的部署中的校准 FP8 Cache | 专用路径，当前主要与 Flash Attention 和校准流程配合使用。 |
-| `int4_per_token_head` | Packed INT4，使用逐 token、逐 head scale | 高压缩率 KV Cache | 专用的逐 head 量化路径，需要后端实现该模式。 |
-| `int8_per_token_head` | INT8，使用逐 token、逐 head scale | 低损耗的逐 head KV Cache 压缩 | 专用的逐 head 量化路径，需要后端实现该模式。 |
-| `fp8_ds_mla` | DeepSeek MLA packed、block-scaled FP8 | DeepSeek V3.2/V4 系列的 MLA 压缩 Cache | 专用 MLA layout，仅适用于兼容的 DeepSeek/MLA 实现。 |
-| `nvfp4_ds_mla` | DeepSeek MLA packed NVFP4 | DeepSeek V4.1 MLA 压缩 Cache | 专用 MLA layout，需要兼容的 FlashMLA/MLA 实现和硬件支持。 |
-| `nvfp4` | Packed NVFP4 | NVFP4 KV Cache 量化 | 需要专用 NVFP4 kernel 和硬件支持。 |
-| `nvfp4_4over6` | 使用 4-over-6 scale selection 的 packed NVFP4 | 通过重构误差选择 scale 的 NVFP4 Cache | 专用 NVFP4 layout，不是普通 Attention 后端的通用 fallback。 |
-| `turboquant_k8v4` | TurboQuant K8V4 packed format | TurboQuant KV Cache 压缩 | 需要专用 TurboQuant 实现。 |
-| `turboquant_4bit_nc` | TurboQuant 4-bit non-contiguous format | 4-bit TurboQuant KV Cache 压缩 | 需要专用 TurboQuant 实现。 |
-| `turboquant_k3v4_nc` | TurboQuant K3V4 non-contiguous format | K3V4 TurboQuant KV Cache 压缩 | 需要专用 TurboQuant 实现。 |
-| `turboquant_3bit_nc` | TurboQuant 3-bit non-contiguous format | 3-bit TurboQuant KV Cache 压缩 | 需要专用 TurboQuant 实现。 |
+| `kv_cache_dtype`      | Cache 表示形式                                | 典型使用场景                           | 可用性与说明                                                                          |
+| ----------------------- | --------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------- |
+| `auto`                | 模型 dtype                                    | 默认配置                               | 使用模型自身的 dtype，兼容性最广。                                                    |
+| `float16`             | FP16                                          | FP16 部署中的原生精度 Cache            | 适用于希望使用 FP16 的通用非量化 Cache。                                              |
+| `bfloat16`            | BF16                                          | BF16 部署中的原生精度 Cache            | 通用非量化 Cache。某些默认使用量化 Cache 的模型需要显式指定 BF16。                    |
+| `fp8`                 | FP8 E4M3，逐张量                              | 通用 FP8 KV Cache 量化                 | `fp8_e4m3` 的别名；CUDA 11.8+ 和 ROCm 支持，但仍要求所选 Attention 后端实现该模式。 |
+| `fp8_e4m3`            | FP8 E4M3，逐张量                              | 使用 E4M3 格式的 FP8 KV Cache 量化     | CUDA 11.8+ 和 ROCm 支持；仍要求后端支持。                                             |
+| `fp8_e5m2`            | FP8 E5M2，逐张量                              | 需要 E5M2 格式时的 FP8 KV Cache 量化   | 支持 CUDA 11.8+；通常不适用于 ROCm。                                                  |
+| `fp8_inc`             | Gaudi FP8 E4M3 表示形式                       | Intel Gaudi/HPU 上的 FP8 KV Cache      | HPU 专用表示形式，不是通用的 CUDA/ROCm 选项。                                         |
+| `fp8_per_token_head`  | FP8，使用逐 token、逐 head scale              | 对精度敏感的部署中的校准 FP8 Cache     | 专用路径，当前主要与 Flash Attention 和校准流程配合使用。                             |
+| `int4_per_token_head` | Packed INT4，使用逐 token、逐 head scale      | 高压缩率 KV Cache                      | 专用的逐 head 量化路径，需要后端实现该模式。                                          |
+| `int8_per_token_head` | INT8，使用逐 token、逐 head scale             | 低损耗的逐 head KV Cache 压缩          | 专用的逐 head 量化路径，需要后端实现该模式。                                          |
+| `fp8_ds_mla`          | DeepSeek MLA packed、block-scaled FP8         | DeepSeek V3.2/V4 系列的 MLA 压缩 Cache | 专用 MLA layout，仅适用于兼容的 DeepSeek/MLA 实现。                                   |
+| `nvfp4_ds_mla`        | DeepSeek MLA packed NVFP4                     | DeepSeek V4.1 MLA 压缩 Cache           | 专用 MLA layout，需要兼容的 FlashMLA/MLA 实现和硬件支持。                             |
+| `nvfp4`               | Packed NVFP4                                  | NVFP4 KV Cache 量化                    | 需要专用 NVFP4 kernel 和硬件支持。                                                    |
+| `nvfp4_4over6`        | 使用 4-over-6 scale selection 的 packed NVFP4 | 通过重构误差选择 scale 的 NVFP4 Cache  | 专用 NVFP4 layout，不是普通 Attention 后端的通用 fallback。                           |
+| `mxfp4_qdq`           | 模型 dtype，模拟 MXFP4 数值                   | 无 packed 存储时的精度测试             | 不节省显存，无需 FP4 Attention 硬件。                                                  |
+| `nvfp4_qdq`           | 模型 dtype，模拟 NVFP4 数值                   | 无 packed 存储时的精度测试             | 不节省显存，无需 FP4 Attention 硬件。                                                  |
+| `nvfp4_4over6_qdq`    | 模型 dtype，模拟 NVFP4 4-over-6 数值          | 带 scale 搜索的精度测试                | 不节省显存，无需 FP4 Attention 硬件。                                                  |
+| `turboquant_k8v4`     | TurboQuant K8V4 packed format                 | TurboQuant KV Cache 压缩               | 需要专用 TurboQuant 实现。                                                            |
+| `turboquant_4bit_nc`  | TurboQuant 4-bit non-contiguous format        | 4-bit TurboQuant KV Cache 压缩         | 需要专用 TurboQuant 实现。                                                            |
+| `turboquant_k3v4_nc`  | TurboQuant K3V4 non-contiguous format         | K3V4 TurboQuant KV Cache 压缩          | 需要专用 TurboQuant 实现。                                                            |
+| `turboquant_3bit_nc`  | TurboQuant 3-bit non-contiguous format        | 3-bit TurboQuant KV Cache 压缩         | 需要专用 TurboQuant 实现。                                                            |
 
-`fp8`、`fp8_e4m3` 和 `fp8_e5m2` 是逐张量 FP8 模式。`*_per_token_head` 模式使用不同的 scale 方案，因此需要后端专门支持。`*_ds_mla`、`nvfp4*` 和 `turboquant_*` 表示 packed layout，而不仅仅是 PyTorch 标量 dtype；它们与特定的 Attention 或量化 kernel 绑定。
+`fp8`、`fp8_e4m3` 和 `fp8_e5m2` 是逐张量 FP8 模式。`*_per_token_head` 模式使用不同的 scale 方案，因此需要后端专门支持。`*_ds_mla`、原生 packed `nvfp4` 模式和 `turboquant_*` 表示 packed layout，而不仅仅是 PyTorch 标量 dtype；它们与特定的 Attention 或量化 kernel 绑定。
 
 对于混合模型，可以使用 `--kv-cache-dtype-skip-layers`，让指定层保留模型原生 dtype，同时量化其余层的 KV Cache。
+
+### FP4 QDQ 模拟
+
+使用 `--kv-cache-dtype mxfp4_qdq`、`--kv-cache-dtype nvfp4_qdq` 或 `--kv-cache-dtype nvfp4_4over6_qdq`，在标准 Attention 层写入浮点 KV Cache 前模拟 FP4 量化与反量化。MXFP4 每 32 个值使用一个 E8M0（二次幂）scale，NVFP4 每 16 个值使用一个 FP8 E4M3 scale；两者都舍入到 E2M1 数值。`nvfp4_4over6_qdq` 对每组比较 `max/6` 与 `max/4` scale 的重建平方误差，选择误差更小者；误差相同则选择 `max/6`。
+
+```bash
+vllm serve <model> --kv-cache-dtype nvfp4_qdq
+```
+
+这是精度模拟，**不会**节省 KV Cache 显存，也无需 FP4 Attention 硬件。MLA 和模型专用缓存不受影响。`--kv-cache-dtype-skip-layers` 指定的层也会跳过 QDQ。
 
 ### 支持的 FP8 KV Cache 量化方案
 
@@ -55,13 +68,12 @@ vLLM 支持两种主要的 FP8 KV Cache 量化策略：
    所有量化 scale 都设置为 `1.0`。
 
    配置方式：
+
    ```python
    kv_cache_dtype="fp8"
    ```
-
 2. **推荐：使用数据集校准（通过 `llm-compressor`）：**
    使用经过选择的校准数据集估计 scale，以获得更好的精度。这需要安装 [llm-compressor](https://github.com/vllm-project/llm-compressor)。
-
 3. **已保存的量化模型：**
    直接加载已经包含量化参数和 scale 的模型。
 

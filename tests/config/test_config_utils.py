@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 
 import pytest
@@ -241,6 +241,20 @@ def test_scheduler_config_hash_includes_max_num_seqs():
 def test_cache_config_hash_ignores_prefix_cache_retention_interval():
     base_hash = CacheConfig().compute_hash()
     assert CacheConfig(prefix_cache_retention_interval=64).compute_hash() == base_hash
+
+
+@pytest.mark.parametrize("format", ["mxfp4", "nvfp4", "nvfp4_4over6"])
+def test_kv_cache_dtype_qdq_uses_model_storage(format):
+    config = CacheConfig(cache_dtype=f"{format}_qdq")
+    assert config.cache_dtype == "auto"
+    assert config.kv_cache_qdq == format
+    assert config.compute_hash() != CacheConfig().compute_hash()
+    serialized = asdict(config)
+    restored = CacheConfig(
+        cache_dtype=serialized["cache_dtype"],
+        kv_cache_qdq=serialized["kv_cache_qdq"],
+    )
+    assert restored.kv_cache_qdq == format
 
 
 def test_envs_compile_factors_relocation_invariant(tmp_path):

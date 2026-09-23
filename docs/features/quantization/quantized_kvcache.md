@@ -29,6 +29,9 @@ drop-in dtype for every model.
 | `nvfp4_ds_mla` | DeepSeek MLA packed NVFP4 | DeepSeek V4.1 MLA compressed cache | Specialized MLA layout; requires the compatible FlashMLA/MLA implementation and hardware support. |
 | `nvfp4` | Packed NVFP4 | NVFP4 KV-cache quantization | Specialized NVFP4 kernels and hardware support are required. |
 | `nvfp4_4over6` | Packed NVFP4 with 4-over-6 scale selection | NVFP4 cache with reconstruction-error-aware scale selection | Specialized NVFP4 layout; not a universal fallback for ordinary attention backends. |
+| `mxfp4_qdq` | Model dtype with simulated MXFP4 values | FP4 accuracy testing without packed storage | No memory savings or FP4 attention hardware needed. |
+| `nvfp4_qdq` | Model dtype with simulated NVFP4 values | FP4 accuracy testing without packed storage | No memory savings or FP4 attention hardware needed. |
+| `nvfp4_4over6_qdq` | Model dtype with simulated NVFP4 4-over-6 values | FP4 accuracy testing with scale search | No memory savings or FP4 attention hardware needed. |
 | `turboquant_k8v4` | TurboQuant K8V4 packed format | TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
 | `turboquant_4bit_nc` | TurboQuant 4-bit non-contiguous format | 4-bit TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
 | `turboquant_k3v4_nc` | TurboQuant K3V4 non-contiguous format | K3V4 TurboQuant KV-cache compression | Specialized TurboQuant implementation. |
@@ -36,12 +39,31 @@ drop-in dtype for every model.
 
 `fp8`, `fp8_e4m3`, and `fp8_e5m2` are per-tensor FP8 modes. The
 `*_per_token_head` modes use a different scaling scheme and therefore require
-backend-specific support. The `*_ds_mla`, `nvfp4*`, and `turboquant_*` values
+backend-specific support. The `*_ds_mla`, packed `nvfp4` modes, and `turboquant_*` values
 describe packed layouts rather than only a PyTorch scalar dtype; they are tied
 to particular attention or quantization kernels.
 
 For hybrid models, `--kv-cache-dtype-skip-layers` can leave selected layers at
 the model's native dtype while quantizing the remaining KV cache layers.
+
+### FP4 QDQ Simulation
+
+Use `--kv-cache-dtype mxfp4_qdq`, `--kv-cache-dtype nvfp4_qdq`, or
+`--kv-cache-dtype nvfp4_4over6_qdq` to simulate FP4 rounding of keys and values
+before storing them in a floating-point KV cache. MXFP4 uses 32-value E8M0
+(power-of-two) blocks; NVFP4 uses 16-value FP8 E4M3 scales. Both round values
+to the E2M1 codebook. The `nvfp4_4over6` mode evaluates scales based on
+`max/6` and `max/4` for each block and selects the one with lower squared
+reconstruction error (choosing `max/6` on a tie). For example:
+
+```bash
+vllm serve <model> --kv-cache-dtype mxfp4_qdq
+```
+
+This is an accuracy experiment, not packed FP4 storage: it does **not** save
+cache memory or require FP4 attention hardware. Only standard attention layers
+are simulated; MLA and model-specific caches are not affected. Layers selected with
+`--kv-cache-dtype-skip-layers` also skip QDQ.
 
 ### Supported FP8 KV-Cache Quantization Schemes
 

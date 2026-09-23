@@ -55,6 +55,9 @@ CacheDType = Literal[
     "fp8_per_token_head",
     "nvfp4",
     "nvfp4_4over6",
+    "mxfp4_qdq",
+    "nvfp4_qdq",
+    "nvfp4_4over6_qdq",
 ]
 
 
@@ -117,7 +120,11 @@ class CacheConfig:
     to fp8.
     "nvfp4_4over6" uses the NVFP4 layout and selects between max/6 and max/4
     scales per 16 values by minimizing squared reconstruction error.
+    "*_qdq" simulates FP4 rounding while storing the KV cache in model dtype;
+    it does not reduce KV cache memory usage.
     """
+    kv_cache_qdq: Literal["mxfp4", "nvfp4", "nvfp4_4over6"] | None = None
+    """QDQ mode selected by cache_dtype; actual storage uses the model dtype."""
     is_attention_free: bool = False
     """Whether the model is attention-free. This is primarily set in
     `ModelConfig` and that value should be manually duplicated here."""
@@ -326,6 +333,17 @@ class CacheConfig:
             self.user_specified_mamba_block_size = True
         return self
 
+    @model_validator(mode="after")
+    def _validate_kv_cache_qdq(self) -> "CacheConfig":
+        if self.cache_dtype in (
+            "mxfp4_qdq",
+            "nvfp4_qdq",
+            "nvfp4_4over6_qdq",
+        ):
+            self.kv_cache_qdq = self.cache_dtype.removesuffix("_qdq")
+            self.cache_dtype = "auto"
+        return self
+
     @field_validator("mamba_cache_mode", mode="after")
     @classmethod
     def _validate_mamba_cache_mode(cls, mode: MambaCacheMode) -> MambaCacheMode:
@@ -340,7 +358,9 @@ class CacheConfig:
     @field_validator("cache_dtype", mode="after")
     @classmethod
     def _validate_cache_dtype(cls, cache_dtype: CacheDType) -> CacheDType:
-        if kv_cache_uses_per_token_head_scales(cache_dtype):
+        if cache_dtype.endswith("_qdq"):
+            logger.info("Using %s to simulate FP4 KV values in model dtype.", cache_dtype)
+        elif kv_cache_uses_per_token_head_scales(cache_dtype):
             logger.info(
                 "Using %s data type to store kv cache. It reduces the GPU "
                 "memory footprint and boosts the performance. "
