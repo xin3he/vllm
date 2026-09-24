@@ -34,6 +34,26 @@ def test_fp4_kv_cache_qdq_formats_have_distinct_group_sizes():
     assert fp4_kv_cache_qdq(tensor, "nvfp4")[0, 0, 16] > 0.5
 
 
+def test_mxfp4_scale_uses_rounded_block_maximum():
+    tensor = torch.zeros(32, dtype=torch.bfloat16)
+    tensor[0] = 3.25
+    tensor[1] = 0.5859375
+
+    assert fp4_kv_cache_qdq(tensor, "mxfp4")[1] == 0.5
+
+
+def test_nvfp4_midpoint_uses_reciprocal_scale():
+    tensor = torch.zeros(16, dtype=torch.bfloat16)
+    tensor[0] = 5.625
+    tensor[1] = 1.171875
+    tensor[2] = -1.171875
+
+    restored = fp4_kv_cache_qdq(tensor, "nvfp4")
+
+    assert restored[1] == 1.40625
+    assert restored[2] == -1.40625
+
+
 def test_nvfp4_4over6_selects_lower_error_for_each_group():
     tensor = torch.tensor([4.0] * 8 + [2.0] * 8 + [6.0] * 16)
     restored = fp4_kv_cache_qdq(tensor, "nvfp4_4over6")
