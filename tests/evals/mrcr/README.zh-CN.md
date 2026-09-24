@@ -182,6 +182,15 @@ VLLM_PYTHON=/path/to/python \
 | `--seed`              | 所有 dtype 共享的 sample 和生成随机种子       | `42`                   |
 | `--server-arg`        | 传给`vllm serve` 的额外参数，可重复         | 无                       |
 
+要遍历所选 needle 桶的全部数据，传入 `--num-samples -1`。数据集目前有 2、4、8 needle 各 800 条，共 2400 条（每桶两个 parquet 文件）。实际评测条数仍受模型的 prompt token 上限筛选；运行日志中的 `Loaded N samples` 是最终条数。默认的正数采样模式保持原有取样范围。
+
+```bash
+CUDA_VISIBLE_DEVICES=0 ./tests/evals/mrcr/compare_kv_cache_dtypes.sh \
+    --model Qwen/Qwen3-0.6B \
+    --devices "0" \
+    --num-samples -1
+```
+
 ## 配置示例
 
 ```yaml

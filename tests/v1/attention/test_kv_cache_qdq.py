@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
 from vllm.model_executor.layers.attention.kv_cache_qdq import fp4_kv_cache_qdq
+from vllm.v1.attention.backends.flashinfer import FlashInferMetadataBuilder
 
 
 @pytest.mark.parametrize("format,group_size", [("mxfp4", 32), ("nvfp4", 16)])
@@ -79,6 +82,50 @@ def test_nvfp4_e2m1_midpoints_round_to_even():
     torch.testing.assert_close(fp4_kv_cache_qdq(tensor, "nvfp4"), expected)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_nvfp4_qdq_compiles_midpoint_indices():
+    tensor = torch.tensor(
+        [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0, 6.0] + [0.0] * 8,
+        device="cuda",
+        dtype=torch.bfloat16,
+    ).repeat(4, 2, 1)
+    compiled_qdq = torch.compile(fp4_kv_cache_qdq, backend="inductor")
+
+    torch.testing.assert_close(
+        compiled_qdq(tensor, "nvfp4"),
+        fp4_kv_cache_qdq(tensor, "nvfp4"),
+    )
+
+
 def test_fp4_kv_cache_qdq_rejects_unknown_format():
     with pytest.raises(ValueError, match="Unsupported KV cache QDQ format"):
         fp4_kv_cache_qdq(torch.zeros(16), "invalid")
+
+
+@pytest.mark.parametrize("format", ["nvfp4", "nvfp4_4over6"])
+def test_flashinfer_qdq_nvfp4_keeps_model_dtype_query(format: str, monkeypatch):
+    from vllm.v1.attention.backends import flashinfer
+
+    monkeypatch.setattr(
+        flashinfer.current_platform,
+        "is_device_capability_family",
+        lambda family: family == 100,
+    )
+    builder = SimpleNamespace(
+        vllm_config=SimpleNamespace(
+            attention_config=SimpleNamespace(
+                disable_flashinfer_q_quantization=False
+            )
+        ),
+        cache_config=SimpleNamespace(kv_cache_qdq=format),
+        cache_dtype="auto",
+        model_config=SimpleNamespace(dtype=torch.bfloat16),
+        kv_cache_spec=SimpleNamespace(dtype=torch.bfloat16),
+    )
+
+    assert FlashInferMetadataBuilder.get_q_data_type(builder, is_prefill=True) == (
+        torch.bfloat16
+    )
+    assert FlashInferMetadataBuilder.get_q_data_type(builder, is_prefill=False) == (
+        torch.bfloat16
+    )

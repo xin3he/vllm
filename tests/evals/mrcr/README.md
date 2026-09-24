@@ -109,6 +109,12 @@ more aggressive comparison, for example:
   --max-prompt-tokens 32768
 ```
 
+Pass `--num-samples -1` to evaluate every eligible row in the selected needle
+buckets. The dataset currently has 800 rows each for 2, 4, and 8 needles
+(2400 total, across two parquet files per bucket). Rows exceeding the prompt
+token limit are still skipped; check `Loaded N samples` for the evaluated count.
+Positive sample counts retain the original sampling behavior.
+
 ## Configuration
 
 ```yaml

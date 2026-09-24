@@ -21,9 +21,11 @@ from tqdm.asyncio import tqdm
 
 DATASET_REPO = "openai/mrcr"
 NEEDLE_SHARDS = {
-    2: "2needle/2needle_0.parquet",
-    4: "4needle/4needle_0.parquet",
-    8: "8needle/8needle_0.parquet",
+    needle_count: [
+        f"{needle_count}needle/{needle_count}needle_{index}.parquet"
+        for index in range(2)
+    ]
+    for needle_count in (2, 4, 8)
 }
 # Reserve headroom for chat-template tokens on top of the messages.
 PROMPT_SAFETY_BUFFER = 256
@@ -72,20 +74,22 @@ def _load_mrcr_samples(
         ) from e
 
     max_chars = max_prompt_tokens * CHARS_PER_TOKEN
-    per_bucket = num_samples // len(needles)
-    leftover = num_samples - per_bucket * len(needles)
+    if num_samples != -1 and num_samples <= 0:
+        raise ValueError("num_samples must be positive or -1 for all samples")
+    per_bucket = num_samples // len(needles) if num_samples != -1 else 0
+    leftover = num_samples - per_bucket * len(needles) if num_samples != -1 else 0
 
     samples: list[dict] = []
     for idx, n in enumerate(needles):
         if n not in NEEDLE_SHARDS:
             raise ValueError(f"Unsupported needle count {n}")
         target = per_bucket + (1 if idx < leftover else 0)
-        if target == 0:
+        if num_samples != -1 and target == 0:
             continue
 
         ds = load_dataset(
             DATASET_REPO,
-            data_files=NEEDLE_SHARDS[n],
+            data_files=NEEDLE_SHARDS[n] if num_samples == -1 else NEEDLE_SHARDS[n][0],
             split="train",
             streaming=True,
         ).shuffle(seed=seed + n, buffer_size=16)
@@ -109,10 +113,10 @@ def _load_mrcr_samples(
                 }
             )
             taken += 1
-            if taken >= target:
+            if num_samples != -1 and taken >= target:
                 break
 
-        if taken < target:
+        if num_samples != -1 and taken < target:
             print(f"Warning: only {taken}/{target} samples for n_needles={n}")
 
     if not samples:

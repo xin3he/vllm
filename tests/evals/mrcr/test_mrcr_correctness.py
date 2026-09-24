@@ -8,12 +8,65 @@ Usage:
 """
 
 import shlex
+import sys
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from tests.utils import RemoteOpenAIServer
 
+from . import mrcr_eval
 from .mrcr_eval import evaluate_mrcr
+
+
+@pytest.mark.parametrize(
+    ("num_samples", "expected_count"),
+    [(-1, 6), (3, 3)],
+)
+def test_load_mrcr_samples_respects_unbounded_mode(
+    monkeypatch, num_samples, expected_count
+):
+    loaded_files = []
+
+    def load_dataset(repo, data_files, **kwargs):
+        files = data_files if isinstance(data_files, list) else [data_files]
+        loaded_files.append(files)
+        rows = [
+            {
+                "n_chars": 2,
+                "prompt": "[]",
+                "answer": "answer",
+                "random_string_to_prepend": "prefix",
+                "n_needles": int(path.split("needle/")[0]),
+            }
+            for path in files
+        ]
+        return SimpleNamespace(shuffle=lambda **kwargs: rows)
+
+    monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load_dataset))
+    monkeypatch.setattr(mrcr_eval, "count_chat_tokens", lambda *args: 10)
+
+    samples = mrcr_eval._load_mrcr_samples(
+        needles=[2, 4, 8],
+        max_prompt_tokens=100,
+        num_samples=num_samples,
+        seed=42,
+        base_url="http://127.0.0.1:8000",
+        model_name="test-model",
+    )
+
+    assert len(samples) == expected_count
+    assert [
+        sum(sample["n_needles"] == needle for sample in samples)
+        for needle in (2, 4, 8)
+    ] == [expected_count // 3] * 3
+    assert loaded_files == [
+        mrcr_eval.NEEDLE_SHARDS[needle]
+        if num_samples == -1
+        else [mrcr_eval.NEEDLE_SHARDS[needle][0]]
+        for needle in (2, 4, 8)
+    ]
 
 
 def _split_host_port(url: str, default_port: int = 8000) -> tuple[str, int]:

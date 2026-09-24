@@ -25,9 +25,9 @@ def fp4_kv_cache_qdq(tensor: torch.Tensor, format: str) -> torch.Tensor:
             values / scale if format == "mxfp4" else values * scale.reciprocal()
         ).abs().contiguous()
         indices = torch.bucketize(scaled, boundaries)
-        indices = indices + (
-            (scaled == 0.75) | (scaled == 1.75) | (scaled == 3.5)
-        ).long()
+        indices = torch.where(scaled == 0.75, 2, indices)
+        indices = torch.where(scaled == 1.75, 4, indices)
+        indices = torch.where(scaled == 3.5, 6, indices)
         return levels[indices] * values.sign() * scale
 
     if format == "mxfp4":

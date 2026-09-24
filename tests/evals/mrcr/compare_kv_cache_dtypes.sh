@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source /data/xinhe/.venv/bin/activate
 export no_proxy='localhost,127.0.0.1,.example.com'
-export NO_PROXY="$no_proxy"
-export http_proxy="http://127.0.0.1:2080"
-export https_proxy="http://127.0.0.1:2080"
-export HTTP_PROXY="$http_proxy"
-export HTTPS_PROXY="$https_proxy"
-export HF_HOME=/data/xinhe/.cache/huggingface
-export VLLM_WORKER_MULTIPROC_METHOD=spawn
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
@@ -28,7 +20,7 @@ Options:
     --devices "ID,..."         Devices to rotate across (default: CUDA_VISIBLE_DEVICES)
     --output-dir DIR            Result directory (default: kv-cache-results/mrcr-<timestamp>)
   --port PORT                 First server port (default: 8000)
-  --num-samples N             MRCR samples per dtype (default: 40)
+    --num-samples N             MRCR samples per dtype (-1: all, default: 40, total 800*3)
   --needles "N ..."           Needle buckets (default: "2 4 8")
   --max-prompt-tokens N       Prompt token limit (default: server-derived)
   --max-tokens N              Maximum generated tokens (default: 2048)
@@ -164,7 +156,9 @@ if ((PORT > 65535)); then
     echo "error: --port must not exceed 65535: $PORT" >&2
     exit 2
 fi
-require_positive_integer --num-samples "$NUM_SAMPLES"
+if [[ "$NUM_SAMPLES" != "-1" ]]; then
+    require_positive_integer --num-samples "$NUM_SAMPLES"
+fi
 require_positive_integer --max-tokens "$MAX_TOKENS"
 require_positive_integer --concurrency "$CONCURRENCY"
 if [[ -n "$MAX_PROMPT_TOKENS" ]]; then
@@ -236,6 +230,7 @@ run_dtype() {
 
     CUDA_VISIBLE_DEVICES="$device" setsid vllm serve "$MODEL" \
         --kv-cache-dtype "$dtype" \
+        --gpu-memory-utilization 0.6 \
         --port "$port" \
         --disable-uvicorn-access-log \
         "${SERVER_ARGS[@]}" >"$log_file" 2>&1 &
@@ -291,7 +286,7 @@ wait_for_server() {
             return 1
         fi
         ((attempts += 1))
-        if ((attempts >= 600)); then
+        if ((attempts >= 1200)); then
             echo "error: server did not become ready: $url" >&2
             return 1
         fi
