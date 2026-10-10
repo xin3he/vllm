@@ -58,6 +58,7 @@ CacheDType = Literal[
     "mxfp4_qdq",
     "nvfp4_qdq",
     "nvfp4_4over6_qdq",
+    "nvfp4_e5m3_qdq",
 ]
 
 
@@ -120,11 +121,14 @@ class CacheConfig:
     to fp8.
     "nvfp4_4over6" uses the NVFP4 layout and selects between max/6 and max/4
     scales per 16 values by minimizing squared reconstruction error.
-    "*_qdq" simulates FP4 rounding while storing the KV cache in model dtype;
-    it does not reduce KV cache memory usage.
+    "nvfp4_e5m3_qdq" is NVFP4 with unsigned E5M3 block scales.
+    "*_qdq" simulates FP4 rounding and stores the result in an FP8 (e4m3)
+    KV cache, so attention runs on FP8 KV.
     """
-    kv_cache_qdq: Literal["mxfp4", "nvfp4", "nvfp4_4over6"] | None = None
-    """QDQ mode selected by cache_dtype; actual storage uses the model dtype."""
+    kv_cache_qdq: (
+        Literal["mxfp4", "nvfp4", "nvfp4_4over6", "nvfp4_e5m3"] | None
+    ) = None
+    """QDQ mode selected by cache_dtype; actual storage uses FP8 (e4m3)."""
     is_attention_free: bool = False
     """Whether the model is attention-free. This is primarily set in
     `ModelConfig` and that value should be manually duplicated here."""
@@ -339,9 +343,10 @@ class CacheConfig:
             "mxfp4_qdq",
             "nvfp4_qdq",
             "nvfp4_4over6_qdq",
+            "nvfp4_e5m3_qdq",
         ):
             self.kv_cache_qdq = self.cache_dtype.removesuffix("_qdq")
-            self.cache_dtype = "auto"
+            self.cache_dtype = "fp8"
         return self
 
     @field_validator("mamba_cache_mode", mode="after")
@@ -359,7 +364,9 @@ class CacheConfig:
     @classmethod
     def _validate_cache_dtype(cls, cache_dtype: CacheDType) -> CacheDType:
         if cache_dtype.endswith("_qdq"):
-            logger.info("Using %s to simulate FP4 KV values in model dtype.", cache_dtype)
+            logger.info(
+                "Using %s to simulate FP4 KV values in FP8 KV cache.", cache_dtype
+            )
         elif kv_cache_uses_per_token_head_scales(cache_dtype):
             logger.info(
                 "Using %s data type to store kv cache. It reduces the GPU "

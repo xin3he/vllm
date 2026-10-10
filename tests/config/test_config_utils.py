@@ -243,10 +243,12 @@ def test_cache_config_hash_ignores_prefix_cache_retention_interval():
     assert CacheConfig(prefix_cache_retention_interval=64).compute_hash() == base_hash
 
 
-@pytest.mark.parametrize("format", ["mxfp4", "nvfp4", "nvfp4_4over6"])
-def test_kv_cache_dtype_qdq_uses_model_storage(format):
+@pytest.mark.parametrize(
+    "format", ["mxfp4", "nvfp4", "nvfp4_4over6", "nvfp4_e5m3"]
+)
+def test_kv_cache_dtype_qdq_uses_fp8_storage(format):
     config = CacheConfig(cache_dtype=f"{format}_qdq")
-    assert config.cache_dtype == "auto"
+    assert config.cache_dtype == "fp8"
     assert config.kv_cache_qdq == format
     assert config.compute_hash() != CacheConfig().compute_hash()
     serialized = asdict(config)

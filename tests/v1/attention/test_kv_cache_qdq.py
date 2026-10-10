@@ -76,6 +76,19 @@ def test_nvfp4_4over6_ties_choose_max_over_six():
     )
 
 
+def test_nvfp4_e5m3_scale_range_and_rounding():
+    # 2**-12 is below E4M3's range but representable in E5M3.
+    tensor = torch.zeros(32)
+    tensor[0] = 6.5625
+    tensor[16] = 6 * 2.0**-12
+
+    restored = fp4_kv_cache_qdq(tensor, "nvfp4_e5m3")
+
+    assert restored[0] == 6 * 1.125
+    assert restored[16] == 6 * 2.0**-12
+    assert fp4_kv_cache_qdq(tensor, "nvfp4")[16] != 6 * 2.0**-12
+
+
 def test_nvfp4_e2m1_midpoints_round_to_even():
     tensor = torch.tensor([0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0, 6.0] + [0.0] * 8)
     expected = torch.tensor([0.0, 1.0, 1.0, 2.0, 2.0, 4.0, 4.0, 6.0] + [0.0] * 8)

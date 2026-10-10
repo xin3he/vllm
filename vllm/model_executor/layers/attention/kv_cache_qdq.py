@@ -4,10 +4,21 @@
 import torch
 import torch.nn.functional as F
 
+# Unsigned E5M3: bias 15, subnormals, all codes finite.
+_UE5M3_MIN = 2.0**-17
+_UE5M3_MAX = 1.875 * 2.0**16
+
+
+def _round_to_ue5m3(scale: torch.Tensor) -> torch.Tensor:
+    scale = scale.clamp(min=_UE5M3_MIN, max=_UE5M3_MAX).contiguous()
+    exponent = ((scale.view(torch.int32) >> 23) & 0xFF) - 127
+    quantum = torch.exp2((exponent.clamp(min=-14) - 3).float())
+    return torch.round(scale / quantum) * quantum
+
 
 def fp4_kv_cache_qdq(tensor: torch.Tensor, format: str) -> torch.Tensor:
     """Simulate block-scaled E2M1 KV storage in the input's floating dtype."""
-    if format not in ("mxfp4", "nvfp4", "nvfp4_4over6"):
+    if format not in ("mxfp4", "nvfp4", "nvfp4_4over6", "nvfp4_e5m3"):
         raise ValueError(f"Unsupported KV cache QDQ format: {format}")
 
     group_size = 32 if format == "mxfp4" else 16
@@ -38,6 +49,8 @@ def fp4_kv_cache_qdq(tensor: torch.Tensor, format: str) -> torch.Tensor:
             -127, 127
         )
         scale = torch.exp2(exponent)
+    elif format == "nvfp4_e5m3":
+        scale = _round_to_ue5m3(absmax / 6)
     else:
         scale = (absmax / 6).clamp(min=2**-9, max=448)
         scale = scale.to(torch.float8_e4m3fn).float()

@@ -46,7 +46,9 @@ def test_optional_type():
     assert optional_type_func("42") == 42
 
 
-@pytest.mark.parametrize("format", ["mxfp4", "nvfp4", "nvfp4_4over6"])
+@pytest.mark.parametrize(
+    "format", ["mxfp4", "nvfp4", "nvfp4_4over6", "nvfp4_e5m3"]
+)
 def test_kv_cache_dtype_qdq_cli(format):
     parser = EngineArgs.add_cli_args(FlexibleArgumentParser())
     args = EngineArgs.from_cli_args(
